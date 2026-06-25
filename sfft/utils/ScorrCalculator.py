@@ -46,11 +46,20 @@ class Scorr_Calculator:
         p_conv = _gaussian_kernel_2d(fwhm_convd_side_px, gaussian_half)
         K_big = _embed_centered_then_shift(K_sfft, image_shape)
         P_conv_big = _embed_centered_then_shift(p_conv, image_shape)
-        P_D = np.real(fft.ifft2(fft.fft2(K_big) * fft.fft2(P_conv_big)))
-        s = P_D.sum()
-        if s > 0:
-            P_D /= s
-        return P_D
+        try:
+            import cupy as xp
+            K_big, P_conv_big = xp.asarray(K_big), xp.asarray(P_conv_big)
+            P_D = xp.real(xp.fft.ifft2(xp.fft.fft2(K_big) * xp.fft.fft2(P_conv_big)))
+            s = P_D.sum()
+            if s > 0:
+                P_D = P_D / s
+            return xp.asnumpy(P_D)
+        except Exception:
+            P_D = np.real(fft.ifft2(fft.fft2(K_big) * fft.fft2(P_conv_big)))
+            s = P_D.sum()
+            if s > 0:
+                P_D /= s
+            return P_D
 
     @staticmethod
     def compute_decorr(diff, K_sfft, fwhm_convd_side_px, PixA_SCI, PixA_REF,
@@ -68,9 +77,9 @@ class Scorr_Calculator:
         diff_filled = np.where(nan_mask, 0.0, diff).astype(np.float64)
 
         skysig_sci = SkyLevel_Estimator.SLE(
-            PixA_obj=np.nan_to_num(np.asarray(PixA_SCI, dtype=np.float64)))[1]
+            PixA_obj=np.nan_to_num(np.asarray(PixA_SCI[::3, ::3], dtype=np.float64)))[1]
         skysig_ref = SkyLevel_Estimator.SLE(
-            PixA_obj=np.nan_to_num(np.asarray(PixA_REF, dtype=np.float64)))[1]
+            PixA_obj=np.nan_to_num(np.asarray(PixA_REF[::3, ::3], dtype=np.float64)))[1]
         if conv_side == "REF":
             skysig_conv, skysig_unconv = skysig_ref, skysig_sci
         else:
@@ -89,7 +98,7 @@ class Scorr_Calculator:
         S = xp.fft.ifft2(FdDIFF * xp.conj(FPSF)).real
         S = xp.asnumpy(S) if on_gpu else S
 
-        skysig_S = SkyLevel_Estimator.SLE(PixA_obj=S)[1]
+        skysig_S = SkyLevel_Estimator.SLE(PixA_obj=S[::3, ::3])[1]
         if skysig_S > 0:
             S = S / skysig_S
         if nan_mask.any():
